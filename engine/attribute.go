@@ -17,6 +17,7 @@ type Domain struct {
 // AKA Field
 // AKA Column
 type Attribute struct {
+	id            string
 	name          string
 	typeName      string
 	typeInstance  interface{}

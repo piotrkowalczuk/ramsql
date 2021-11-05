@@ -111,6 +111,7 @@ func (p *Predicate) Eval(row virtualRow) (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("Attribute [%s] not found in row", left)
 	}
+
 	p.LeftValue.v = val.v
 
 	return p.Operator(p.LeftValue, p.RightValue), nil

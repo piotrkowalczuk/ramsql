@@ -1003,10 +1003,10 @@ func TestDistinct(t *testing.T) {
 
 	t.Run("distinct", func(t *testing.T) {
 		var surname string
-		testDistinct(t, `SELECT DISTINCT surname FROM user`, 4, &surname)
+		testDistinct(t, `SELECT DISTINCT u.surname FROM user AS u`, 4, &surname)
 	})
 	t.Run("distinct-on", func(t *testing.T) {
 		var name string
-		testDistinct(t, `SELECT DISTINCT ON (surname, age) name FROM user`, 6, &name)
+		testDistinct(t, `SELECT DISTINCT ON (u.surname, u.age) u.name FROM user AS u`, 6, &name)
 	})
 }

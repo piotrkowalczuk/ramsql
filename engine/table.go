@@ -11,6 +11,7 @@ import (
 // A table with data is called a Relation
 type Table struct {
 	name       string
+	alias      string
 	attributes []Attribute
 }
 
@@ -23,11 +24,36 @@ func NewTable(name string) *Table {
 	return t
 }
 
+// NewTableWithAlias initializes a new Table with given alias.
+func NewTableWithAlias(name string, alias string) *Table {
+	t := &Table{
+		name:  name,
+		alias: alias,
+	}
+
+	return t
+}
+
+func NewTableFromDecl(t *parser.Decl) *Table {
+	if len(t.Decl) > 0 && t.Decl[0].Token == parser.AsToken {
+		return NewTableWithAlias(t.Lexeme, t.Decl[0].Decl[0].Lexeme)
+	} else {
+		return NewTable(t.Lexeme)
+	}
+}
+
 // AddAttribute is used by CREATE TABLE and ALTER TABLE
 // Want to check that name isn't already taken
 func (t *Table) AddAttribute(attr Attribute) error {
 	t.attributes = append(t.attributes, attr)
 	return nil
+}
+
+func (t *Table) Alias() string {
+	if t.alias == "" {
+		return t.name
+	}
+	return t.alias
 }
 
 // String returns a printable string with table name and attributes
@@ -40,7 +66,19 @@ func (t Table) String() string {
 		stringy += a.name + " " + a.typeName
 	}
 	stringy += ")"
+
 	return stringy
+}
+
+type Tables []*Table
+
+func (t Tables) ByAlias(alias string) (*Table, bool) {
+	for _, tt := range t {
+		if tt.Alias() == alias {
+			return tt, true
+		}
+	}
+	return nil, false
 }
 
 func createTableExecutor(e *Engine, tableDecl *parser.Decl, conn protocol.EngineConn) error {
@@ -92,4 +130,13 @@ func createTableExecutor(e *Engine, tableDecl *parser.Decl, conn protocol.Engine
 	e.relations[t.name] = NewRelation(t)
 	conn.WriteResult(0, 1)
 	return nil
+}
+
+func tableAlias(decl *parser.Decl) string {
+	for _, decl := range decl.Decl {
+		if decl.Token == parser.AsToken {
+			return decl.Decl[0].Lexeme
+		}
+	}
+	return ""
 }

@@ -3,17 +3,14 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
-
 	"github.com/proullon/ramsql/engine/log"
 	"github.com/proullon/ramsql/engine/parser"
 	"github.com/proullon/ramsql/engine/protocol"
+	"strconv"
 )
 
-func attributeExistsInTable(e *Engine, attr string, table string) error {
-
-	r := e.relation(table)
+func attributeExistsInTable(e *Engine, attr string, table *Table) error {
+	r := e.relation(table.name)
 	if r == nil {
 		return fmt.Errorf("table \"%s\" does not exist", table)
 	}
@@ -34,34 +31,35 @@ func attributeExistsInTable(e *Engine, attr string, table string) error {
 	return nil
 }
 
-func attributesExistInTables(e *Engine, attributes []Attribute, tables []string) error {
-
+func attributesExistInTables(e *Engine, attributes []*parser.Decl, tables Tables) error {
 	for _, attr := range attributes {
-		if attr.name == "COUNT" {
-			continue
-		}
-
-		if strings.Contains(attr.name, ".") {
-			t := strings.Split(attr.name, ".")
-			if err := attributeExistsInTable(e, t[1], t[0]); err != nil {
-				return err
-			}
+		if attr.Token == parser.CountToken {
 			continue
 		}
 
 		found := 0
 		for _, t := range tables {
+			// Check alias
+			if len(attr.Decl) > 0 {
+				for _, decl := range attr.Decl {
+					if decl.Lexeme == t.Alias() {
+						if err := attributeExistsInTable(e, attr.Lexeme, t); err == nil {
+							found++
+						}
+					}
+				}
+			} else {
+				if err := attributeExistsInTable(e, attr.Lexeme, t); err == nil {
+					found++
+				}
+			}
+		}
 
-			if err := attributeExistsInTable(e, attr.name, t); err == nil {
-				found++
-			}
-
-			if found == 0 {
-				return fmt.Errorf("attribute %s does not exist in tables %v", attr.name, tables)
-			}
-			if found > 1 {
-				return fmt.Errorf("ambiguous attribute %s", attr.name)
-			}
+		if found == 0 {
+			return fmt.Errorf("attribute %s does not exist in tables %v", attr.Lexeme, tables)
+		}
+		if found > 1 {
+			return fmt.Errorf("ambiguous attribute %s", attr.Lexeme)
 		}
 	}
 
@@ -94,17 +92,18 @@ func selectExecutor(e *Engine, selectDecl *parser.Decl, conn protocol.EngineConn
 			tables = fromExecutor(selectDecl.Decl[i])
 		case parser.WhereToken:
 			// get WHERE declaration
-			pred, err := whereExecutor2(e, selectDecl.Decl[i].Decl, tables[0].name)
+			pred, err := whereExecutor2(e, selectDecl.Decl[i].Decl, tables[0])
 			if err != nil {
 				return err
 			}
 			predicates = []PredicateLinker{pred}
 		case parser.JoinToken:
-			j, err := joinExecutor(selectDecl.Decl[i])
+			_, j, err := joinExecutor(selectDecl.Decl[i])
 			if err != nil {
 				return err
 			}
 			joiners = append(joiners, j)
+			//tables = append(tables, t)
 		case parser.OrderToken:
 			orderFunctor, err := orderbyExecutor(selectDecl.Decl[i], tables)
 			if err != nil {
@@ -136,7 +135,7 @@ func selectExecutor(e *Engine, selectDecl *parser.Decl, conn protocol.EngineConn
 		}
 
 		// get attribute to selected
-		attr, err := getSelectedAttribute(e, selectDecl.Decl[i], tables)
+		attr, err := getSelectedAttribute(e, selectDecl.Decl[i], tables[:1])
 		if err != nil {
 			return err
 		}
@@ -152,7 +151,8 @@ func selectExecutor(e *Engine, selectDecl *parser.Decl, conn protocol.EngineConn
 		}
 	}
 
-	err = generateVirtualRows(e, attributes, conn, tables[0].name, joiners, predicates, functors)
+
+	err = generateVirtualRows(e, attributes, conn, tables[0], joiners, predicates, functors)
 	if err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func (f *defaultSelectFunction) FeedVirtualRow(vrow virtualRow) error {
 		}
 		row = append(row, fmt.Sprintf("%v", val.v))
 	}
-
+	
 	return f.conn.WriteRow(row)
 }
 
@@ -289,11 +289,11 @@ func isExecutor(isDecl *parser.Decl, p *Predicate) error {
 	return nil
 }
 
-func or(e *Engine, left []*parser.Decl, right []*parser.Decl, tableName string) (PredicateLinker, error) {
+func or(e *Engine, left []*parser.Decl, right []*parser.Decl, table *Table) (PredicateLinker, error) {
 	p := &orOperator{}
 
 	if len(left) > 0 {
-		lPred, err := whereExecutor2(e, left, tableName)
+		lPred, err := whereExecutor2(e, left, table)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +301,7 @@ func or(e *Engine, left []*parser.Decl, right []*parser.Decl, tableName string) 
 	}
 
 	if len(right) > 0 {
-		rPred, err := whereExecutor2(e, right, tableName)
+		rPred, err := whereExecutor2(e, right, table)
 		if err != nil {
 			return nil, err
 		}
@@ -311,11 +311,11 @@ func or(e *Engine, left []*parser.Decl, right []*parser.Decl, tableName string) 
 	return p, nil
 }
 
-func and(e *Engine, left []*parser.Decl, right []*parser.Decl, tableName string) (PredicateLinker, error) {
+func and(e *Engine, left []*parser.Decl, right []*parser.Decl, table *Table) (PredicateLinker, error) {
 	p := &andOperator{}
 
 	if len(left) > 0 {
-		lPred, err := whereExecutor2(e, left, tableName)
+		lPred, err := whereExecutor2(e, left, table)
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +323,7 @@ func and(e *Engine, left []*parser.Decl, right []*parser.Decl, tableName string)
 	}
 
 	if len(right) > 0 {
-		rPred, err := whereExecutor2(e, right, tableName)
+		rPred, err := whereExecutor2(e, right, table)
 		if err != nil {
 			return nil, err
 		}
@@ -333,8 +333,7 @@ func and(e *Engine, left []*parser.Decl, right []*parser.Decl, tableName string)
 	return p, nil
 }
 
-func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (PredicateLinker, error) {
-
+func whereExecutor2(e *Engine, decl []*parser.Decl, fromTable *Table) (PredicateLinker, error) {
 	for i, cond := range decl {
 
 		if cond.Token == parser.AndToken {
@@ -342,7 +341,7 @@ func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (Predi
 				return nil, fmt.Errorf("query error: AND not followed by any predicate")
 			}
 
-			p, err := and(e, decl[:i], decl[i+1:], fromTableName)
+			p, err := and(e, decl[:i], decl[i+1:], fromTable)
 			return p, err
 		}
 
@@ -350,7 +349,7 @@ func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (Predi
 			if i+1 == len(decl) {
 				return nil, fmt.Errorf("query error: OR not followd by any predicate")
 			}
-			p, err := or(e, decl[:i], decl[i+1:], fromTableName)
+			p, err := or(e, decl[:i], decl[i+1:], fromTable)
 			return p, err
 		}
 	}
@@ -368,14 +367,15 @@ func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (Predi
 	case parser.IsToken, parser.InToken, parser.EqualityToken, parser.DistinctnessToken, parser.LeftDipleToken, parser.RightDipleToken, parser.LessOrEqualToken, parser.GreaterOrEqualToken:
 		break
 	default:
-		fromTableName = cond.Decl[0].Lexeme
+		fromTable = NewTableFromDecl(cond.Decl[0])
 		cond.Decl = cond.Decl[1:]
 		break
 	}
 
 	p.LeftValue.lexeme = cond.Lexeme
+	p.LeftValue.table = fromTable.name
 
-	if err := attributeExistsInTable(e, p.LeftValue.lexeme, fromTableName); err != nil {
+	if err := attributeExistsInTable(e, p.LeftValue.lexeme, fromTable); err != nil {
 		return nil, err
 	}
 
@@ -385,7 +385,7 @@ func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (Predi
 		if err != nil {
 			return nil, err
 		}
-		p.LeftValue.table = fromTableName
+		p.LeftValue.table = fromTable.name
 		return p, nil
 	}
 
@@ -395,7 +395,7 @@ func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (Predi
 		if err != nil {
 			return nil, err
 		}
-		p.LeftValue.table = fromTableName
+		p.LeftValue.table = fromTable.name
 		return p, nil
 	}
 
@@ -414,7 +414,7 @@ func whereExecutor2(e *Engine, decl []*parser.Decl, fromTableName string) (Predi
 	p.RightValue.lexeme = val.Lexeme
 	p.RightValue.valid = true
 
-	p.LeftValue.table = fromTableName
+	//p.LeftValue.table = fromTableName
 	return p, nil
 }
 
@@ -521,19 +521,14 @@ func whereExecutor(whereDecl *parser.Decl, fromTableName string) ([]Predicate, e
 func fromExecutor(fromDecl *parser.Decl) []*Table {
 	var tables []*Table
 	for _, t := range fromDecl.Decl {
-		tables = append(tables, NewTable(t.Lexeme))
+		tables = append(tables, NewTableFromDecl(t))
 	}
 
 	return tables
 }
 
-func getSelectedAttribute(e *Engine, attr *parser.Decl, tables []*Table) ([]Attribute, error) {
+func getSelectedAttribute(e *Engine, attr *parser.Decl, tables Tables) ([]Attribute, error) {
 	var attributes []Attribute
-	var t []string
-
-	for i := range tables {
-		t = append(t, tables[i].name)
-	}
 
 	switch attr.Token {
 	case parser.StarToken:
@@ -542,10 +537,13 @@ func getSelectedAttribute(e *Engine, attr *parser.Decl, tables []*Table) ([]Attr
 			if r == nil {
 				return nil, errors.New("Relation " + table.name + " not found")
 			}
-			attributes = append(attributes, r.table.attributes...)
+			for _, attr := range r.table.attributes{
+				attr.id = table.Alias() +"."+attr.name
+				attributes = append(attributes, attr)
+			}
 		}
 	case parser.CountToken:
-		err := attributesExistInTables(e, []Attribute{NewAttribute(attr.Decl[0].Lexeme, "", false)}, t)
+		err := attributesExistInTables(e, attr.Decl, tables)
 		if err != nil && attr.Decl[0].Lexeme != "*" {
 			return nil, err
 		}
@@ -553,13 +551,19 @@ func getSelectedAttribute(e *Engine, attr *parser.Decl, tables []*Table) ([]Attr
 	case parser.StringToken:
 		attribute := attr.Lexeme
 		if len(attr.Decl) > 0 {
-			if err := attributeExistsInTable(e, attr.Lexeme, attr.Decl[0].Lexeme); err != nil {
+			var table *Table
+			if t, ok := tables.ByAlias(attr.Decl[0].Lexeme); ok {
+				table = t
+			} else {
+				table = NewTable(attr.Decl[0].Lexeme)
+			}
+			if err := attributeExistsInTable(e, attr.Lexeme, table); err != nil {
 				return nil, err
 			}
 			attribute = attr.Decl[0].Lexeme + "." + attribute
 		}
 		newAttr := NewAttribute(attribute, "text", false)
-		if err := attributesExistInTables(e, []Attribute{newAttr}, t); err != nil {
+		if err := attributesExistInTables(e, []*parser.Decl{attr}, tables); err != nil {
 			return nil, err
 		}
 		attributes = append(attributes, newAttr)

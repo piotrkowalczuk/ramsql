@@ -59,6 +59,7 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			if distinctOpen {
 				distinctDecl.Add(attrDecl)
 			}
@@ -100,6 +101,19 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 			return nil, err
 		}
 		fromDecl.Add(tableNameDecl)
+
+		if p.is(AsToken) {
+			tableNameAsDecl, err := p.consumeToken(AsToken)
+			if err != nil {
+				return nil, err
+			}
+			tableNameAsAliasDecl, err := p.parseAttribute()
+			if err != nil {
+				return nil, err
+			}
+			tableNameAsDecl.Add(tableNameAsAliasDecl)
+			tableNameDecl.Add(tableNameAsDecl)
+		}
 
 		// If no next, then it's implicit where
 		if !p.hasNext() {
