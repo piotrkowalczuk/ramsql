@@ -155,8 +155,6 @@ func generateVirtualRows(e *Engine, attr []Attribute, conn protocol.EngineConn, 
 			}
 		}
 
-		fmt.Println("ROW BEFORE", row)
-
 		// for first join predicates
 		err := join(row, relations, joinPredicates, 0, selectPredicates, functors)
 		if err != nil {
@@ -211,10 +209,8 @@ func join(row virtualRow, relations map[string]*Relation, predicates []joiner, p
 				table:  r.table.name,
 			}
 			if strings.Contains(v.lexeme, ".") {
-				fmt.Println("A",v.lexeme)
 				row[v.lexeme] = v
 			} else {
-				fmt.Println("B",v.table+"."+v.lexeme)
 				row[v.table+"."+v.lexeme] = v
 			}
 		}

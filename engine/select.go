@@ -98,12 +98,12 @@ func selectExecutor(e *Engine, selectDecl *parser.Decl, conn protocol.EngineConn
 			}
 			predicates = []PredicateLinker{pred}
 		case parser.JoinToken:
-			_, j, err := joinExecutor(selectDecl.Decl[i])
+			t, j, err := joinExecutor(selectDecl.Decl[i])
 			if err != nil {
 				return err
 			}
 			joiners = append(joiners, j)
-			//tables = append(tables, t)
+			tables = append(tables, t)
 		case parser.OrderToken:
 			orderFunctor, err := orderbyExecutor(selectDecl.Decl[i], tables)
 			if err != nil {
@@ -135,7 +135,7 @@ func selectExecutor(e *Engine, selectDecl *parser.Decl, conn protocol.EngineConn
 		}
 
 		// get attribute to selected
-		attr, err := getSelectedAttribute(e, selectDecl.Decl[i], tables[:1])
+		attr, err := getSelectedAttribute(e, selectDecl.Decl[i], tables)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,6 @@ func selectExecutor(e *Engine, selectDecl *parser.Decl, conn protocol.EngineConn
 			return err
 		}
 	}
-
 
 	err = generateVirtualRows(e, attributes, conn, tables[0], joiners, predicates, functors)
 	if err != nil {
@@ -218,7 +217,7 @@ func (f *defaultSelectFunction) FeedVirtualRow(vrow virtualRow) error {
 		}
 		row = append(row, fmt.Sprintf("%v", val.v))
 	}
-	
+
 	return f.conn.WriteRow(row)
 }
 
@@ -532,15 +531,14 @@ func getSelectedAttribute(e *Engine, attr *parser.Decl, tables Tables) ([]Attrib
 
 	switch attr.Token {
 	case parser.StarToken:
-		for _, table := range tables {
-			r := e.relation(table.name)
-			if r == nil {
-				return nil, errors.New("Relation " + table.name + " not found")
-			}
-			for _, attr := range r.table.attributes{
-				attr.id = table.Alias() +"."+attr.name
-				attributes = append(attributes, attr)
-			}
+		table := tables[0]
+		r := e.relation(table.name)
+		if r == nil {
+			return nil, errors.New("Relation " + table.name + " not found")
+		}
+		for _, attr := range r.table.attributes {
+			attr.id = table.Alias() + "." + attr.name
+			attributes = append(attributes, attr)
 		}
 	case parser.CountToken:
 		err := attributesExistInTables(e, attr.Decl, tables)
@@ -568,8 +566,6 @@ func getSelectedAttribute(e *Engine, attr *parser.Decl, tables Tables) ([]Attrib
 		}
 		attributes = append(attributes, newAttr)
 	}
-
-	fmt.Println(attributes)
 
 	return attributes, nil
 }
