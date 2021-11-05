@@ -565,6 +565,8 @@ func getSelectedAttribute(e *Engine, attr *parser.Decl, tables []*Table) ([]Attr
 		attributes = append(attributes, newAttr)
 	}
 
+	fmt.Println(attributes)
+
 	return attributes, nil
 }
 
