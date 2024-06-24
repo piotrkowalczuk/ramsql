@@ -2,11 +2,9 @@ package engine_test
 
 import (
 	"database/sql"
-	"testing"
-
-	"github.com/proullon/ramsql/engine/log"
-
 	_ "github.com/proullon/ramsql/driver"
+	"github.com/proullon/ramsql/engine/log"
+	"testing"
 )
 
 func TestJoinOrderBy(t *testing.T) {
@@ -20,7 +18,7 @@ func TestJoinOrderBy(t *testing.T) {
 
 	init := []string{
 		`CREATE TABLE user (id BIGSERIAL, name TEXT)`,
-		`CREATE TABLE address (id BIGSERIAL, user_id INT, value TEXT)`,
+		`CREATE TABLE address (id BIGSERIAL, user_id INT64, value TEXT)`,
 		`INSERT INTO user (name) VALUES ($$riri$$)`,
 		`INSERT INTO user (name) VALUES ($$fifi$$)`,
 		`INSERT INTO user (name) VALUES ($$loulou$$)`,

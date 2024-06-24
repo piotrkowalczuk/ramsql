@@ -550,6 +550,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 		return nil, err
 	}
 
+
 	switch p.cur().Token {
 	case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken:
 		decl, err := p.consumeToken(p.cur().Token)

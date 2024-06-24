@@ -69,7 +69,6 @@ func insertIntoTableExecutor(e *Engine, insertDecl *parser.Decl, conn protocol.E
         |-> email
 */
 func getRelation(e *Engine, intoDecl *parser.Decl) (*Relation, []*parser.Decl, error) {
-
 	// Decl[0] is the table name
 	r := e.relation(intoDecl.Decl[0].Lexeme)
 	if r == nil {
@@ -77,7 +76,7 @@ func getRelation(e *Engine, intoDecl *parser.Decl) (*Relation, []*parser.Decl, e
 	}
 
 	for i := range intoDecl.Decl[0].Decl {
-		err := attributeExistsInTable(e, intoDecl.Decl[0].Decl[i].Lexeme, intoDecl.Decl[0].Lexeme)
+		err := attributeExistsInTable(e, intoDecl.Decl[0].Decl[i].Lexeme, NewTable(intoDecl.Decl[0].Lexeme))
 		if err != nil {
 			return nil, nil, err
 		}

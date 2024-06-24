@@ -89,12 +89,11 @@ func (i *inner) Evaluate(row virtualRow, r *Relation, index int) (bool, error) {
 
 // The optional WHERE, GROUP BY, and HAVING clauses in the table expression specify a pipeline of successive transformations performed on the table derived in the FROM clause.
 // All these transformations produce a virtual table that provides the rows that are passed to the select list to compute the output rows of the query.
-func generateVirtualRows(e *Engine, attr []Attribute, conn protocol.EngineConn, t1Name string, joinPredicates []joiner, selectPredicates []PredicateLinker, functors []selectFunctor) error {
-
+func generateVirtualRows(e *Engine, attr []Attribute, conn protocol.EngineConn, table *Table, joinPredicates []joiner, selectPredicates []PredicateLinker, functors []selectFunctor) error {
 	// get t1 and lock it
-	t1 := e.relation(t1Name)
+	t1 := e.relation(table.name)
 	if t1 == nil {
-		return fmt.Errorf("table %s not found", t1Name)
+		return fmt.Errorf("table %s not found", table.name)
 	}
 	t1.RLock()
 	defer t1.RUnlock()
@@ -117,7 +116,7 @@ func generateVirtualRows(e *Engine, attr []Attribute, conn protocol.EngineConn, 
 	for _, a := range attr {
 		alias = append(alias, a.name)
 		if strings.Contains(a.name, ".") == false {
-			a.name = t1Name + "." + a.name
+			a.name = table.name + "." + a.name
 		}
 		header = append(header, a.name)
 	}
@@ -134,13 +133,26 @@ func generateVirtualRows(e *Engine, attr []Attribute, conn protocol.EngineConn, 
 		// create virtualrow
 		row := make(virtualRow)
 		for index := range t1.rows[i].Values {
+			lexeme := t1.table.attributes[index].name
+			for _, a := range attr {
+				parts := strings.Split(a.name, ".")
+				if parts[len(parts)-1] == t1.table.attributes[index].name {
+					lexeme = a.name
+					break
+				}
+			}
+
 			v := Value{
 				v:      t1.rows[i].Values[index],
 				valid:  true,
-				lexeme: t1.table.attributes[index].name,
-				table:  t1Name,
+				lexeme: lexeme,
+				table:  table.name,
 			}
-			row[v.table+"."+v.lexeme] = v
+			if strings.Contains(v.lexeme, ".") {
+				row[v.lexeme] = v
+			} else {
+				row[v.table+"."+v.lexeme] = v
+			}
 		}
 
 		// for first join predicates
@@ -148,7 +160,6 @@ func generateVirtualRows(e *Engine, attr []Attribute, conn protocol.EngineConn, 
 		if err != nil {
 			return err
 		}
-
 	}
 
 	for i := range functors {
@@ -197,9 +208,14 @@ func join(row virtualRow, relations map[string]*Relation, predicates []joiner, p
 				lexeme: r.table.attributes[index].name,
 				table:  r.table.name,
 			}
-			row[v.table+"."+v.lexeme] = v
+			if strings.Contains(v.lexeme, ".") {
+				row[v.lexeme] = v
+			} else {
+				row[v.table+"."+v.lexeme] = v
+			}
 		}
 
+		
 		// if last predicate
 		if last {
 			err = selectRows(row, selectPredicates, functors)
@@ -225,21 +241,21 @@ func join(row virtualRow, relations map[string]*Relation, predicates []joiner, p
                |-> project
 
 */
-func joinExecutor(decl *parser.Decl) (joiner, error) {
+func joinExecutor(decl *parser.Decl) (*Table, joiner, error) {
 	decl.Stringy(0)
 
 	j := &inner{}
 
 	// Table name
 	if decl.Decl[0].Token != parser.StringToken {
-		return nil, fmt.Errorf("join: expected table name, got %v", decl.Decl[0])
+		return nil, nil, fmt.Errorf("join: expected table name, got %v", decl.Decl[0])
 	}
 	j.table = decl.Decl[0].Lexeme
 
 	// Predicate should be ON
 	on := decl.Decl[1]
 	if on.Token != parser.OnToken {
-		return nil, fmt.Errorf("join: expected ON, got %v", on)
+		return nil, nil, fmt.Errorf("join: expected ON, got %v", on)
 	}
 
 	// Set first value
@@ -255,5 +271,5 @@ func joinExecutor(decl *parser.Decl) (joiner, error) {
 	j.t2Value.table = on.Decl[2].Decl[0].Lexeme
 
 	log.Debug("JOIN %s ON %s = %s !", j.table, j.t1Value.table+"."+j.t1Value.lexeme, j.t2Value.table+"."+j.t2Value.lexeme)
-	return j, nil
+	return NewTableFromDecl(decl.Decl[0]), j, nil
 }
